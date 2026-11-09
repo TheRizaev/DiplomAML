@@ -1,14 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Шаг 15. Данные для рисунков диплома (только numpy/pandas; сами графики строятся отдельно).
-
-Файлы (в папке проекта):
-  fig_curves.csv   — доля предотвращённого ущерба D_K при K = 10…20000: модели × правило (p, p·L) × набор + оракул
-  fig_amounts.csv  — гистограмма log10(сумма, $) для честных и отмывочных переводов (HI-Small)
-  fig_neff.csv     — эффективное число случаев n_eff при L = min(A, C) для C от 10^3 до 10^9 (оба набора)
-  fig_hetero.csv   — распределение доли отмывочных соседей у отмывочных и честных переводов (оба набора)
-Запуск: python 15_fig_data.py (около 5 минут).
-"""
 from pathlib import Path
 
 import numpy as np
@@ -87,9 +76,7 @@ for DATA in ("HI-Small", "LI-Small"):
     yt, A = y[te], usd[te]
     L = np.minimum(A, CAP)
     V = float((y[tr] == 0).sum() / y[tr].sum()) ** 0.5
-    print(f"{DATA}: загружено, тест {len(te):,}", flush=True)
 
-    # ---- кривые D_K
     curves.append(pd.DataFrame({"dataset": DATA, "model": "Оракул", "rule": "oracle", "K": KS,
                                 "mean": curve(L * yt, L, yt), "std": 0.0}))
     models = {}
@@ -113,14 +100,11 @@ for DATA in ("HI-Small", "LI-Small"):
             vals = np.array([curve(p if rule == "p" else p * L, L, yt) for p in runs])
             curves.append(pd.DataFrame({"dataset": DATA, "model": name, "rule": rule, "K": KS,
                                         "mean": vals.mean(0), "std": vals.std(0)}))
-    print(f"{DATA}: кривые готовы ({', '.join(models)})", flush=True)
 
-    # ---- n_eff от потолка C
     for C in np.logspace(3, 9, 25):
         for part, Lp in (("тест", np.minimum(A[yt == 1], C)), ("весь набор", np.minimum(usd[y == 1], C))):
             neff_rows.append({"dataset": DATA, "part": part, "C": C, "n_eff": Lp.sum() ** 2 / (Lp ** 2).sum()})
 
-    # ---- гетерофилия: доля отмывочных соседей у ребра (соседи — переводы с общим счётом)
     deg = np.bincount(S, minlength=N) + np.bincount(D, minlength=N)
     lab = np.bincount(S, weights=y, minlength=N) + np.bincount(D, weights=y, minlength=N)
     nb = deg[S] + deg[D] - 2
@@ -131,7 +115,6 @@ for DATA in ("HI-Small", "LI-Small"):
         h, _ = np.histogram(s_, bins=bins)
         for lo, c in zip(bins[:-1], h):
             het_rows.append({"dataset": DATA, "cls": cls, "bin_lo": lo, "frac": c / len(s_)})
-        print(f"{DATA}: класс {cls}: средняя доля отмывочных соседей {s_.mean():.4f}", flush=True)
 
     if DATA == "HI-Small":
         b = np.arange(0, 10.01, 0.1)
@@ -146,4 +129,3 @@ for DATA in ("HI-Small", "LI-Small"):
 pd.concat(curves).to_csv(HERE / "fig_curves.csv", index=False)
 pd.DataFrame(neff_rows).to_csv(HERE / "fig_neff.csv", index=False)
 pd.DataFrame(het_rows).to_csv(HERE / "fig_hetero.csv", index=False)
-print("Готово: fig_curves.csv, fig_amounts.csv, fig_neff.csv, fig_hetero.csv", flush=True)
