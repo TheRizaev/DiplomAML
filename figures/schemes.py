@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-"""Схемы для диплома: шаблоны отмывания, общая схема метода, слой GNN. PNG 300 dpi, светлый фон для печати."""
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -22,7 +20,6 @@ def node(ax, xy, color=BLUE, r=0.075):
     ax.add_patch(plt.Circle(xy, r, fill=False, color="white", lw=1.5, zorder=4))
 
 
-# ---------------------------------------------------------------- 1. шаблоны отмывания
 import math
 pats = {}
 pats["Веер наружу (fan-out)"] = ([(0, 0)] + [(1, y) for y in (-0.9, -0.3, 0.3, 0.9)], [(0, i) for i in range(1, 5)], {0})
@@ -53,8 +50,6 @@ fig.text(0.5, 0.015, "Узлы — счета, стрелки — перевод
 fig.tight_layout(rect=(0, 0.04, 1, 1))
 fig.savefig(OUT + "fig_patterns.png", dpi=300, facecolor="white")
 plt.close(fig)
-
-# ---------------------------------------------------------------- 2. общая схема метода
 
 
 def box(ax, x, y, w, h, text, edge=BLUE, fill="#eef4fc", fs=9.5, bold=False):
@@ -87,7 +82,6 @@ fig.tight_layout()
 fig.savefig(OUT + "fig_pipeline.png", dpi=300, facecolor="white")
 plt.close(fig)
 
-# ---------------------------------------------------------------- 3. слой GNN
 fig, ax = plt.subplots(figsize=(11, 5.2))
 ax.set_xlim(0, 11); ax.set_ylim(0, 5.2); ax.axis("off")
 box(ax, 0.2, 3.7, 1.8, 0.9, "Отправитель s\nh_s", BLUE, "#eef4fc")
@@ -109,4 +103,3 @@ ax.text(5.6, 2.62, "Разные сети для входящих и исход�
 fig.tight_layout()
 fig.savefig(OUT + "fig_gnn_layer.png", dpi=300, facecolor="white")
 plt.close(fig)
-print("ok")
