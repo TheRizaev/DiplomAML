@@ -1,17 +1,15 @@
-# -*- coding: utf-8 -*-
-"""Шаг 11. Сводка: XGBoost vs GNN (только свои признаки) vs гибридная GNN vs ансамбль, среднее ± std по сидам."""
 import json
 from pathlib import Path
 import pandas as pd
 
 HERE = Path(__file__).resolve().parent
 import os as _os
-DATA = _os.environ.get("AML_DATA", "HI-Small")          # HI-Small (по умолчанию) или LI-Small
-OUTD = HERE if DATA == "HI-Small" else HERE / DATA     # результаты второго набора — в отдельной папке
+DATA = _os.environ.get("AML_DATA", "HI-Small")
+OUTD = HERE if DATA == "HI-Small" else HERE / DATA
 OUTD.mkdir(exist_ok=True)
 
 import re as _re
-TAGF = _os.environ.get("SUMMARY_TAG", "")             # "" — основные запуски, "_long" — долгое обучение
+TAGF = _os.environ.get("SUMMARY_TAG", "")
 rows = [json.loads(p.read_text(encoding="utf-8")) for p in OUTD.glob("metrics_10_*.json")
         if _re.search(r"_s\d+" + _re.escape(TAGF) + r"$", p.stem)]
 for p in ([] if TAGF else OUTD.glob("metrics_07_class_*.json")):
@@ -20,7 +18,7 @@ A = pd.DataFrame(rows)
 models = [("xgb", "XGBoost"), ("gnn_plain", "GNN (шаг 7)"), ("gnn_hybrid", "GNN-гибрид"), ("ensemble", "Ансамбль"), ("ensemble_cal", "Ансамбль кал.")]
 lines = []
 def log(s=""):
-    print(s, flush=True); lines.append(s)
+    lines.append(s)
 def cell(m, c):
     v = A.loc[A["model"] == m, c].dropna() * 100
     return f"{v.mean():5.1f} ± {v.std():3.1f}" if len(v) > 1 else (f"{v.mean():5.1f}" if len(v) else "н/д")
