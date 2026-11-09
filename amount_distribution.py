@@ -1,9 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Шаг 2. «Тяжёлый хвост» сумм отмывания: что это за переводы и как определить потери L_i.
-Запуск: python 02_amount_tail.py
-Результаты: results_02.txt
-"""
 import time
 from pathlib import Path
 
@@ -18,7 +12,6 @@ lines = []
 
 def log(*a):
     s = " ".join(str(x) for x in a)
-    print(s, flush=True)
     lines.append(s)
 
 
@@ -42,7 +35,6 @@ df["dst"] = df["To_Bank"] + "_" + df["To_Acc"]
 y = df["Is_Laundering"].values == 1
 n = len(df)
 
-# --- курсы к USD по самим данным (как в шаге 1)
 rates = {"US Dollar": 1.0}
 m = (df["Receiving_Currency"] == "US Dollar") & (df["Payment_Currency"] != "US Dollar") & (df["Amount_Paid"] > 0)
 rates.update((df.loc[m, "Amount_Received"] / df.loc[m, "Amount_Paid"]).groupby(df.loc[m, "Payment_Currency"]).median().to_dict())
@@ -51,20 +43,17 @@ for k, v in (df.loc[m2, "Amount_Paid"] / df.loc[m2, "Amount_Received"]).groupby(
     rates.setdefault(k, v)
 df["usd"] = df["Amount_Paid"] * df["Payment_Currency"].map(rates)
 
-# Проверка курсов: насколько стабилен курс внутри одной валюты
 log("=== 0. Стабильность курсов (разброс Amount_Received/Amount_Paid к USD) ===")
 r = (df.loc[m, "Amount_Received"] / df.loc[m, "Amount_Paid"])
 st = r.groupby(df.loc[m, "Payment_Currency"]).agg(["count", "min", "median", "max"])
 for k, row in st.iterrows():
     log(f"  {k:<18} n={int(row['count']):>6}  min {row['min']:.6g}  med {row['median']:.6g}  max {row['max']:.6g}")
 
-# --- 1. хвост: оригинальные суммы до конвертации
 log("\n=== 1. Хвост в исходной валюте (без конвертации) ===")
 for name, mask in [("честные", ~y), ("отмывание", y)]:
     s = df.loc[mask, "Amount_Paid"]
     log(f"  {name:<10} медиана {s.median():>12,.0f}  p99 {s.quantile(.99):>16,.0f}  max {s.max():>20,.0f}")
 
-# --- 2. топ-30 отмывочных переводов
 log("\n=== 2. Топ-30 отмывочных переводов по сумме в USD ===")
 L = df[y].sort_values("usd", ascending=False)
 top = L.head(30)
@@ -80,12 +69,10 @@ log(f"  Топ-1% по форматам:          {T['Payment_Format'].value_cou
 log(f"  Топ-1% переводы самому себе: {(T['src'] == T['dst']).mean():.2f}")
 log(f"  Уникальных счетов-отправителей в топ-1%: {T['src'].nunique()}, получателей: {T['dst'].nunique()}")
 
-# Повторы одних и тех же денег по цепочке (транзитивная разметка)
 amt_rep = L["usd"].round(-2).value_counts()
 log(f"  Отмывочных сумм, повторяющихся (с точностью до 100 USD) 2+ раз: {(amt_rep > 1).sum()}  "
     f"(в них {amt_rep[amt_rep > 1].sum()} транзакций)")
 
-# --- 3. честные переводы: такой же хвост?
 log("\n=== 3. Сравнение хвостов ===")
 for name, mask in [("честные", ~y), ("отмывание", y)]:
     s = df.loc[mask, "usd"].sort_values(ascending=False)
@@ -93,7 +80,6 @@ for name, mask in [("честные", ~y), ("отмывание", y)]:
     log(f"  {name:<10} доля денег у топ-1%: {s.head(k1).sum() / s.sum():.3f};  "
         f"переводов > 1 млн USD: {(s > 1e6).sum():,} ({(s > 1e6).mean():.4f})")
 
-# --- 4. где хвост во времени (сплит 60/20/20)
 order = np.argsort(df["Timestamp"].values, kind="stable")
 split = np.empty(n, dtype="<U5")
 split[order[:int(n * .6)]] = "train"
@@ -107,7 +93,6 @@ for k_, rr in g.iterrows():
     log(f"  {k_:<6} n={int(rr['count']):>5}  сумма {rr['sum']:>18,.0f} ({rr['sum'] / tot:.1%})  "
         f"медиана {rr['median']:>10,.0f}  max {rr['max']:>16,.0f}")
 
-# --- 5. варианты функции потерь L_i и их концентрация
 log("\n=== 5. Кандидаты для потерь L_i (только отмывочные переводы) ===")
 a = df.loc[y, "usd"].values
 cap = np.quantile(df.loc[~y, "usd"].values, 0.99)
@@ -131,11 +116,10 @@ for name, v in cands.items():
     s = np.sort(v)[::-1]
     k1, k10 = max(1, len(s) // 100), max(1, len(s) // 10)
     w = s / s.sum()
-    neff = 1 / np.sum(w ** 2)   # «эффективное число» транзакций, которые реально определяют метрику
+    neff = 1 / np.sum(w ** 2)
     log(f"  {name:<44}{s[:k1].sum() / s.sum():>12.3f}{s[:k10].sum() / s.sum():>14.3f}{gini(v):>8.3f}{neff:>12.0f}")
 log("  (эфф. число = 1/Σw²: сколько транзакций реально определяют метрику; при L=1 это все отмывочные транзакции)")
 
-# --- 6. Чувствительность «доли пойманных денег»
 log("\n=== 6. Чувствительность метрики «доля пойманных денег» ===")
 s = np.sort(a)[::-1]
 for miss in (1, 5, 10, 50):
