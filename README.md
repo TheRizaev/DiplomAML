@@ -46,45 +46,45 @@ pip install torch --index-url https://download.pytorch.org/whl/cu121
 
 ## Порядок запуска
 
-Скрипты запускаются по очереди из папки проекта. Каждый пишет результаты в `results_*.txt` и `metrics_*.json` рядом с собой.
+Скрипты запускаются по очереди из папки проекта в указанном ниже порядке. Результаты пишутся в файлы `results_*.txt`, `metrics_*.json` и `*.npy` рядом со скриптами.
 
 ```bash
-python 05_check_env.py                      # проверка памяти, видеокарты и PyTorch
-python 01_eda_heterophily.py                # анализ данных и гетерофилия
-python 02_amount_tail.py                    # суммы, функции потерь, n_eff
-python 04_xgb_protocol.py                   # XGBoost по протоколу трёх графов
-python 09_ablation.py                       # абляция: что даёт граф
+python check_env.py                     # проверка памяти, видеокарты и PyTorch
+python eda_heterophily.py               # анализ данных и гетерофилия
+python amount_distribution.py           # суммы, функции потерь, n_eff
+python xgb_three_graphs.py              # XGBoost по протоколу трёх графов
+python ablation_graph_features.py       # абляция: что даёт граф
 for s in 0 1 2; do
-  python 07_gnn_seeds.py --loss class  --seed $s
-  python 07_gnn_seeds.py --loss amount --seed $s
+  python gnn_stable.py --loss class  --seed $s
+  python gnn_stable.py --loss amount --seed $s
 done
-python 08_summary.py                        # сводка XGBoost и GNN
-for s in 0 1 2; do python 10_hybrid.py --seed $s; done
-python 11_summary.py                        # сводка гибрида и ансамблей
-python 12_theory_checks.py                  # проверки главы 2
-python 13_large_tx.py                       # ранжирование по диапазонам сумм
-python 15_fig_data.py                       # данные для рисунков
+python summary_xgb_gnn.py               # сводка XGBoost и GNN
+for s in 0 1 2; do python hybrid_gnn.py --seed $s; done
+python summary_hybrid.py                # сводка гибрида и ансамблей
+python theory_checks.py                 # проверки главы 2
+python large_transactions.py            # ранжирование по диапазонам сумм
+python figure_data.py                   # данные для рисунков
 python figures/charts.py && python figures/schemes.py
 ```
 
-Второй набор данных включается переменной окружения `AML_DATA=LI-Small` (в PowerShell: `$env:AML_DATA="LI-Small"`); его результаты пишутся в подпапку `LI-Small/`. Долгое обучение гибрида: `python 10_hybrid.py --seed 0 --epochs 1500 --tag _long`, сводка по нему — `SUMMARY_TAG=_long python 11_summary.py`.
+Второй набор данных включается переменной окружения `AML_DATA=LI-Small` (в PowerShell: `$env:AML_DATA="LI-Small"`); его результаты пишутся в подпапку `LI-Small/`. Долгое обучение гибрида: `python hybrid_gnn.py --seed 0 --epochs 1500 --tag _long`, сводка по нему — `SUMMARY_TAG=_long python summary_hybrid.py`.
 
 | Файл | Что делает | Раздел работы |
 |---|---|---|
-| `01_eda_heterophily.py` | статистика данных, курсы валют, разбиение по времени, гомофилия, шаблоны отмывания | 3.1, 3.2 |
-| `02_amount_tail.py` | распределение сумм, функции потерь, эффективное число случаев | 2.6 |
-| `03_xgb_budget.py` | первая версия XGBoost (с утечкой через графовые признаки, оставлена для истории) | 4.5 |
-| `04_xgb_protocol.py` | XGBoost по протоколу трёх графов, калибровка | 2.2, 2.4, 3.3 |
-| `05_check_env.py` | проверка окружения и видеокарты | 4.1 |
-| `06_gnn.py` | первая версия графовой нейросети (веса по классу и по сумме) | 2.5, 3.4 |
-| `07_gnn_seeds.py` | устойчивая версия GNN, несколько сидов | 2.5, 3.4 |
-| `08_summary.py` | сводка XGBoost и GNN | 2.5 |
-| `09_ablation.py` | абляция: признаки перевода / графа / оба набора | 3.3.3 |
-| `10_hybrid.py` | гибридная GNN, XGBoost и ансамбли | 3.5 |
-| `11_summary.py` | сводка запусков гибрида | 3.5 |
-| `12_theory_checks.py` | проверка утверждений главы 2: форма `L`, поправка вероятностей, задача о рюкзаке | 2.6, 2.7 |
-| `13_large_tx.py` | качество ранжирования по диапазонам сумм | 3.5.3 |
-| `15_fig_data.py` | данные для рисунков | 2.6, 3.2, 3.5 |
+| `eda_heterophily.py` | статистика данных, курсы валют, разбиение по времени, гомофилия, шаблоны отмывания | 3.1, 3.2 |
+| `amount_distribution.py` | распределение сумм, функции потерь, эффективное число случаев | 2.6 |
+| `xgb_leaky_baseline.py` | первая версия XGBoost (с утечкой через графовые признаки, оставлена для истории) | 4.5 |
+| `xgb_three_graphs.py` | XGBoost по протоколу трёх графов, калибровка | 2.2, 2.4, 3.3 |
+| `check_env.py` | проверка окружения и видеокарты | 4.1 |
+| `gnn_first_version.py` | первая версия графовой нейросети (веса по классу и по сумме) | 2.5, 3.4 |
+| `gnn_stable.py` | устойчивая версия GNN, несколько сидов | 2.5, 3.4 |
+| `summary_xgb_gnn.py` | сводка XGBoost и GNN | 2.5 |
+| `ablation_graph_features.py` | абляция: признаки перевода / графа / оба набора | 3.3.3 |
+| `hybrid_gnn.py` | гибридная GNN, XGBoost и ансамбли | 3.5 |
+| `summary_hybrid.py` | сводка запусков гибрида | 3.5 |
+| `theory_checks.py` | проверка утверждений главы 2: форма `L`, поправка вероятностей, задача о рюкзаке | 2.6, 2.7 |
+| `large_transactions.py` | качество ранжирования по диапазонам сумм | 3.5.3 |
+| `figure_data.py` | данные для рисунков | 2.6, 3.2, 3.5 |
 | `figures/charts.py` | графики по данным шага 15 | — |
 | `figures/schemes.py` | схемы: шаблоны отмывания, метод, слой GNN | — |
 
