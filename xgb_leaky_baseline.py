@@ -1,16 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Шаг 3. Первая модель (XGBoost) + отбор транзакций на проверку при бюджете K.
-
-Что делает:
-  1) строит признаки транзакции и простые графовые признаки счетов (метки в признаках НЕ используются);
-  2) временной сплит 60/20/20, обучение на train, ранняя остановка на val;
-  3) F1 по классу «отмывание» (порог подбирается на val) и PR-AUC — для сравнения с литературой;
-  4) калибровка вероятностей на val (Platt);
-  5) бюджет K проверок на тесте: ранжирование по p против ранжирования по p·L
-     для нескольких вариантов потерь L (потолок, корень, логарифм).
-Запуск: python 03_xgb_budget.py. Результаты: results_03.txt
-"""
 import time
 from pathlib import Path
 
@@ -22,14 +9,13 @@ HERE = Path(__file__).resolve().parent
 DOWNLOADS = Path.home() / "Downloads"
 OUT = HERE / "results_03.txt"
 SEED = 42
-CAP = 1_000_000          # потолок потерь C в USD (параметр штрафа; варьируется в анализе чувствительности)
+CAP = 1_000_000
 BUDGETS = [100, 250, 500, 1000, 2000, 5000]
 lines = []
 
 
 def log(*a):
     s = " ".join(str(x) for x in a)
-    print(s, flush=True)
     lines.append(s)
 
 
@@ -52,7 +38,6 @@ n = len(df)
 y = df["Is_Laundering"].values.astype(np.int8)
 log(f"Загружено {n:,} транзакций за {time.time() - t0:.0f} с")
 
-# ---------------------------------------------------------------- курсы и суммы в USD
 rates = {"US Dollar": 1.0}
 m = (df["Receiving_Currency"] == "US Dollar") & (df["Payment_Currency"] != "US Dollar") & (df["Amount_Paid"] > 0)
 rates.update((df.loc[m, "Amount_Received"] / df.loc[m, "Amount_Paid"]).groupby(df.loc[m, "Payment_Currency"]).median().to_dict())
@@ -63,7 +48,6 @@ usd = (df["Amount_Paid"] * df["Payment_Currency"].map(rates)).values
 usd_r = (df["Amount_Received"] * df["Receiving_Currency"].map(rates)).values
 lusd = np.log1p(usd)
 
-# ---------------------------------------------------------------- признаки
 codes, _ = pd.factorize(pd.concat([df["From_Bank"] + "_" + df["From_Acc"], df["To_Bank"] + "_" + df["To_Acc"]]))
 s, d = codes[:n], codes[n:]
 A = codes.max() + 1
@@ -79,8 +63,8 @@ in_deg = np.bincount(d, minlength=A).astype(float)
 pair = s.astype(np.int64) * A + d
 _, pinv, pcnt = np.unique(pair, return_inverse=True, return_counts=True)
 upair = np.unique(pair)
-u_out = np.bincount((upair // A).astype(np.int64), minlength=A).astype(float)   # число разных получателей
-u_in = np.bincount((upair % A).astype(np.int64), minlength=A).astype(float)     # число разных отправителей
+u_out = np.bincount((upair // A).astype(np.int64), minlength=A).astype(float)
+u_in = np.bincount((upair % A).astype(np.int64), minlength=A).astype(float)
 sum_l_out = np.bincount(s, weights=lusd, minlength=A)
 sum_l_in = np.bincount(d, weights=lusd, minlength=A)
 ach_out = np.bincount(s, weights=is_ach, minlength=A)
@@ -121,12 +105,10 @@ X = pd.DataFrame({
 })
 log(f"Признаков: {X.shape[1]}  (графовые считаются по структуре всего графа без меток, как в протоколе Altman et al.)")
 
-# ---------------------------------------------------------------- временной сплит
 order = np.argsort(df["Timestamp"].values, kind="stable")
 tr, va, te = order[:int(n * .6)], order[int(n * .6):int(n * .8)], order[int(n * .8):]
 log(f"train {len(tr):,} (отмыв. {y[tr].sum()}), val {len(va):,} ({y[va].sum()}), test {len(te):,} ({y[te].sum()})")
 
-# ---------------------------------------------------------------- обучение
 pos_w = float((y[tr] == 0).sum()) / max(1, y[tr].sum())
 clf = xgb.XGBClassifier(
     n_estimators=2000, learning_rate=0.05, max_depth=8, min_child_weight=1,
@@ -141,7 +123,6 @@ p_va = clf.predict_proba(X.iloc[va])[:, 1]
 p_te = clf.predict_proba(X.iloc[te])[:, 1]
 
 
-# ---------------------------------------------------------------- метрики классификации (без sklearn)
 def pr_curve(yt, sc):
     o = np.argsort(-sc, kind="stable")
     yt = yt[o]
@@ -178,7 +159,6 @@ log("  Важность признаков (топ-10, gain-share):")
 for k, v in imp.head(10).items():
     log(f"    {k:<22} {v:.3f}")
 
-# ---------------------------------------------------------------- калибровка (Platt на val)
 def logit(p):
     p = np.clip(p, 1e-7, 1 - 1e-7)
     return np.log(p / (1 - p))
@@ -201,7 +181,6 @@ log("\n=== Калибровка ===")
 for name, pp in [("сырые p", p_te), ("после Platt", pc_te)]:
     log(f"  {name:<12} сумма p на тесте = {pp.sum():8.1f}  при реальном числе отмывочных = {y[te].sum()}")
 
-# ---------------------------------------------------------------- бюджет K
 yt = y[te]
 amt = usd[te]
 losses = {
