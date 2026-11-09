@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-"""Шаг 5a. Проверка компьютера перед обучением GNN: память, процессор, видеокарта, диск, PyTorch."""
 import ctypes
 import os
 import platform
@@ -13,7 +11,6 @@ out = []
 
 def log(*a):
     s = " ".join(str(x) for x in a)
-    print(s, flush=True)
     out.append(s)
 
 
