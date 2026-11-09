@@ -1,14 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Диплом: Экономически оптимальное выявление отмывания денег (IBM AML, HI-Small)
-Шаг 1. Разведочный анализ данных + первая проверка гетерофилии.
-
-Запуск (из папки проекта):
-    python 01_eda_heterophily.py
-
-Скрипт сам ищет HI-Small_Trans.csv (или .zip) и HI-Small_Patterns.txt
-в папке «Загрузки» или рядом с собой. Результаты пишет в results_01.txt и results_01.json.
-"""
 import json
 import os
 import re
@@ -21,8 +10,8 @@ import pandas as pd
 
 HERE = Path(__file__).resolve().parent
 import os as _os
-DATA = _os.environ.get("AML_DATA", "HI-Small")          # HI-Small (по умолчанию) или LI-Small
-OUTD = HERE if DATA == "HI-Small" else HERE / DATA     # результаты второго набора — в отдельной папке
+DATA = _os.environ.get("AML_DATA", "HI-Small")
+OUTD = HERE if DATA == "HI-Small" else HERE / DATA
 OUTD.mkdir(exist_ok=True)
 
 DOWNLOADS = Path.home() / "Downloads"
@@ -35,7 +24,6 @@ res = {}
 
 def log(*a):
     s = " ".join(str(x) for x in a)
-    print(s, flush=True)
     lines.append(s)
 
 
@@ -56,7 +44,6 @@ if trans_path is None:
 log("Файл транзакций:", trans_path)
 log("Файл паттернов:", pat_path)
 
-# ------------------------------------------------------------------ 1. загрузка
 COLS = ["Timestamp", "From_Bank", "From_Acc", "To_Bank", "To_Acc",
         "Amount_Received", "Receiving_Currency", "Amount_Paid",
         "Payment_Currency", "Payment_Format", "Is_Laundering"]
@@ -81,7 +68,6 @@ res["general"] = dict(n=n, n_launder=n_l, rate=n_l / n, accounts=len(acc_full),
                       accounts_short=len(acc_short),
                       t_min=str(df["Timestamp"].min()), t_max=str(df["Timestamp"].max()))
 
-# Распределение отмывания по дням: в конце периода в файле есть «хвост»
 daily = df.groupby(df["Timestamp"].dt.date)["Is_Laundering"].agg(["count", "sum"])
 daily["rate"] = daily["sum"] / daily["count"]
 log("\nПо дням (транзакций, отмывочных, доля):")
@@ -89,7 +75,6 @@ for d, r in daily.iterrows():
     log(f"  {d}: {int(r['count']):>9,}  {int(r['sum']):>5}  {r['rate']:.5f}")
 res["daily"] = {str(k): [int(v["count"]), int(v["sum"])] for k, v in daily.iterrows()}
 
-# ------------------------------------------------------------------ 2. форматы и валюты
 log("\n=== 2. Форматы платежей ===")
 pf = df.groupby("Payment_Format")["Is_Laundering"].agg(["count", "sum", "mean"]).sort_values("mean", ascending=False)
 for k, r in pf.iterrows():
@@ -101,7 +86,6 @@ cur = df["Payment_Currency"].value_counts()
 for k, v in cur.items():
     log(f"  {k:<20} {v:>9,}")
 
-# Курс к доллару, восстановленный по самим данным: строки «валюта X -> доллар»
 rates = {"US Dollar": 1.0}
 m = (df["Receiving_Currency"] == "US Dollar") & (df["Payment_Currency"] != "US Dollar") & (df["Amount_Paid"] > 0)
 r1 = (df.loc[m, "Amount_Received"] / df.loc[m, "Amount_Paid"]).groupby(df.loc[m, "Payment_Currency"]).median()
@@ -120,7 +104,6 @@ res["usd_rates"] = {k: float(v) for k, v in rates.items()}
 
 df["amount_usd"] = df["Amount_Paid"] * df["Payment_Currency"].map(rates)
 
-# ------------------------------------------------------------------ 3. суммы
 log("\n=== 3. Суммы (в USD) ===")
 a = df["amount_usd"]
 for name, mask in [("честные", y == 0), ("отмывание", y == 1)]:
@@ -137,7 +120,6 @@ res["amounts"] = dict(median_licit=float(a[y == 0].median()), median_launder=flo
                       launder_top10_share=float(top10), launder_top1_share=float(top1),
                       launder_total_usd=float(la.sum()))
 
-# ------------------------------------------------------------------ 4. временной сплит
 log("\n=== 4. Временной сплит 60/20/20 (как у Altman et al.) ===")
 order = np.argsort(df["Timestamp"].values, kind="stable")
 cut1, cut2 = int(n * .6), int(n * .8)
@@ -151,10 +133,7 @@ for k, r in sp.iterrows():
     log(f"  {k:<6} {int(r['count']):>9,}  отмыв. {int(r['sum']):>5}  доля {r['mean']:.5f}")
 res["split"] = {k: [int(r["count"]), int(r["sum"])] for k, r in sp.iterrows()}
 
-# ------------------------------------------------------------------ 5. гетерофилия
 log("\n=== 5. Гомофилия / гетерофилия ===")
-# 5a. Уровень рёбер (метки стоят на транзакциях).
-#     Соседи транзакции u->v = все другие транзакции, у которых есть общий счёт (u или v).
 src_codes, uniq = pd.factorize(pd.concat([df["src"], df["dst"]]), sort=False)
 s_idx, d_idx = src_codes[:n], src_codes[n:]
 n_acc = len(uniq)
@@ -171,7 +150,6 @@ log(f"  Для отмывочной транзакции: доля отмыво�
 log(f"  Для честной транзакции:    доля отмывочных среди соседних транзакций = {h_c:.6f}")
 log(f"  Базовая доля отмывания (случайный граф): {base:.6f}  -> «подъём» для отмывания x{h_l / base:.0f}")
 log(f"  Гомофилия класса «отмывание» на рёбрах (доля своих среди соседей): {h_l:.4f}  (1 = только свои, 0 = только чужие)")
-# распределение: сколько отмывочных транзакций почти полностью окружены честными
 fl = frac[y == 1]
 fl = fl[~np.isnan(fl)]
 for thr in (0.05, 0.1, 0.25, 0.5):
@@ -180,14 +158,12 @@ res["edge_homophily"] = dict(launder=float(h_l), licit_launder_frac=float(h_c), 
                              lt05=float((fl < .05).mean()), lt10=float((fl < .1).mean()),
                              lt25=float((fl < .25).mean()), lt50=float((fl < .5).mean()))
 
-# 5b. Уровень счетов. Счёт = «отмыватель», если участвует хотя бы в одной отмывочной транзакции.
 acc_bad = lab > 0
 log(f"\n  Счетов-участников отмывания: {acc_bad.sum():,} из {n_acc:,} ({acc_bad.mean():.4f})")
 share_bad_tx = lab[acc_bad] / deg[acc_bad]
 log(f"  У счёта-участника доля отмывочных среди ВСЕХ его транзакций: медиана {np.median(share_bad_tx):.3f}, "
     f"среднее {share_bad_tx.mean():.3f}")
 log("  (маленькое число = отмыватель «прячется» среди обычных операций, это и есть маскировка)")
-# соседи-счета (по транзакциям, без учёта направления, с повторами)
 nbr_bad = (np.bincount(s_idx, weights=acc_bad[d_idx], minlength=n_acc)
            + np.bincount(d_idx, weights=acc_bad[s_idx], minlength=n_acc))
 with np.errstate(divide="ignore", invalid="ignore"):
@@ -202,7 +178,6 @@ res["node_homophily"] = dict(n_bad=int(acc_bad.sum()), n_acc=int(n_acc),
                              share_bad_tx_mean=float(share_bad_tx.mean()),
                              h_bad=float(hb), h_good=float(hg))
 
-# ------------------------------------------------------------------ 6. паттерны
 if pat_path is not None:
     log("\n=== 6. Файл паттернов ===")
     import zipfile
@@ -242,4 +217,3 @@ if pat_path is not None:
 log(f"\nГотово за {time.time() - t0:.0f} с.")
 OUT_TXT.write_text("\n".join(lines), encoding="utf-8")
 OUT_JSON.write_text(json.dumps(res, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
-print("\nРезультаты сохранены:", OUT_TXT)
