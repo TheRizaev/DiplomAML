@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-"""Графики по данным шага 15: кривые D_K, распределение сумм, n_eff от C, гетерофилия. PNG 300 dpi."""
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -13,7 +11,7 @@ plt.rcParams.update({"font.family": "DejaVu Sans", "font.size": 10, "axes.edgeco
 INK, MUTED, GRID, ORACLE = "#0b0b0b", "#52514e", "#e6e4de", "#9a988f"
 COL = {"XGBoost": "#2a78d6", "GNN-гибрид": "#eb6834", "Ансамбль": "#1baf7a"}
 from pathlib import Path
-SRC = str(Path(__file__).resolve().parent.parent) + "/"   # CSV пишет 15_fig_data.py в корень проекта
+SRC = str(Path(__file__).resolve().parent.parent) + "/"
 OUT = str(Path(__file__).resolve().parent) + "/"
 
 
@@ -24,7 +22,6 @@ def style(ax):
 
 pct = mt.FuncFormatter(lambda v, _: f"{v:.0f}%")
 
-# ---------------------------------------------------------------- 1. D_K от K
 cur = pd.read_csv(SRC + "fig_curves.csv")
 fig, axes = plt.subplots(1, 2, figsize=(11.5, 4.6), sharey=True)
 for ax, ds in zip(axes, ["HI-Small", "LI-Small"]):
@@ -54,7 +51,6 @@ fig.tight_layout(rect=(0, 0.11, 1, 1))
 fig.savefig(OUT + "fig_dk_curves.png", dpi=300, facecolor="white")
 plt.close(fig)
 
-# ---------------------------------------------------------------- 2. суммы и n_eff
 am = pd.read_csv(SRC + "fig_amounts.csv")
 ne = pd.read_csv(SRC + "fig_neff.csv")
 fig, axes = plt.subplots(1, 2, figsize=(11.5, 4.2))
@@ -89,7 +85,6 @@ fig.tight_layout()
 fig.savefig(OUT + "fig_amounts_neff.png", dpi=300, facecolor="white")
 plt.close(fig)
 
-# ---------------------------------------------------------------- 3. гетерофилия
 he = pd.read_csv(SRC + "fig_hetero.csv")
 fig, ax = plt.subplots(figsize=(8, 4.2))
 for ds, col in (("HI-Small", "#2a78d6"), ("LI-Small", "#eb6834")):
@@ -108,4 +103,3 @@ style(ax)
 fig.tight_layout()
 fig.savefig(OUT + "fig_heterophily.png", dpi=300, facecolor="white")
 plt.close(fig)
-print("ok")
