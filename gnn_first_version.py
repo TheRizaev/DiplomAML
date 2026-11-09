@@ -1,25 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Шаг 6. Графовая нейросеть для классификации транзакций (рёбер) — собственная реализация
-в духе Multi-GNN (Egressy et al., AAAI 2024) на чистом PyTorch, без torch_geometric.
-
-Что взято из Multi-GNN:
-  * обратная передача сообщений: входящие и исходящие соседи агрегируются РАЗНЫМИ сетями;
-  * номера портов: у каждого перевода есть номер получателя среди всех получателей отправителя
-    (по времени первого контакта) и номер отправителя у получателя;
-  * обновление рёбер (EU): признаки перевода обновляются на каждом слое по концам ребра.
-Не реализовано: Ego ID (нужна выборка подграфов; на AML-задаче в статье почти не помогает).
-
-Протокол как у Altman et al.: train-граф = train-рёбра, val-граф = train+val, test-граф = все рёбра.
-Обучение full-batch (весь граф за шаг) на CPU или GPU.
-
-Варианты функции потерь (аргумент --loss):
-  class  — взвешенная по классу кросс-энтропия (как в литературе);
-  amount — веса отмывочных переводов пропорциональны потерям L = min(сумма, CAP) (идея диплома).
-
-Запуск: python 06_gnn.py --loss class   и   python 06_gnn.py --loss amount
-Результаты: results_06_<loss>.txt, test_scores_06_<loss>.npy
-"""
 import argparse
 import os
 import time
@@ -58,7 +36,6 @@ lines = []
 
 def log(*a):
     s = " ".join(str(x) for x in a)
-    print(s, flush=True)
     lines.append(s)
     OUT.write_text("\n".join(lines), encoding="utf-8")
 
@@ -76,7 +53,6 @@ t0 = time.time()
 log(f"Устройство: {DEV}, потоков: {torch.get_num_threads()}, вариант потерь: {args.loss}, "
     f"hidden={args.hidden}, layers={args.layers}")
 
-# ------------------------------------------------------------------ данные
 COLS = ["Timestamp", "From_Bank", "From_Acc", "To_Bank", "To_Acc", "Amount_Received",
         "Receiving_Currency", "Amount_Paid", "Payment_Currency", "Payment_Format", "Is_Laundering"]
 df = pd.read_csv(find("HI-Small_Trans", [".csv", ".zip"]), header=0, names=COLS,
@@ -103,7 +79,6 @@ cur_r = pd.factorize(df["Receiving_Currency"])[0]
 fmt = pd.factorize(df["Payment_Format"])[0]
 tmin = df["Timestamp"].values.astype("datetime64[m]").astype(np.int64)
 
-# номера портов: порядок первого контакта с контрагентом
 e = pd.DataFrame({"s": S, "d": D, "t": tmin})
 first = e.groupby(["s", "d"], sort=False)["t"].min().reset_index()
 first["out_port"] = first.sort_values("t").groupby("s").cumcount()
@@ -132,7 +107,6 @@ log(f"Загрузка и признаки: {time.time() - t0:.0f} с.  Счет
 
 
 class Graph:
-    """Набор рёбер (индексы транзакций) + степени узлов в этом графе. Хранится в ОЗУ, на GPU — по требованию."""
 
     def __init__(self, idx):
         self.idx = torch.tensor(idx, dtype=torch.long)
@@ -153,8 +127,7 @@ class Graph:
 G_tr = Graph(tr).to(DEV)
 G_va = Graph(np.concatenate([tr, va]))
 G_te = Graph(order)
-pos_va = torch.arange(len(tr), len(tr) + len(va), device=DEV)    # позиции val-рёбер внутри G_va
-# позиции test-рёбер внутри G_te (order отсортирован по времени, test — последние 20%)
+pos_va = torch.arange(len(tr), len(tr) + len(va), device=DEV)
 pos_te = torch.arange(len(tr) + len(va), n, device=DEV)
 
 
@@ -168,17 +141,17 @@ class MultiGNN(nn.Module):
         self.e_cp, self.e_cr, self.e_fm = nn.Embedding(32, 4), nn.Embedding(32, 4), nn.Embedding(16, 4)
         self.edge_in = nn.Linear(NUM.shape[1] + 12, H)
         self.node_in = nn.Linear(2, H)
-        self.msg_in = nn.ModuleList([mlp(2 * H, H, H) for _ in range(L)])    # от отправителей (входящие)
-        self.msg_out = nn.ModuleList([mlp(2 * H, H, H) for _ in range(L)])   # от получателей (обратная передача)
+        self.msg_in = nn.ModuleList([mlp(2 * H, H, H) for _ in range(L)])
+        self.msg_out = nn.ModuleList([mlp(2 * H, H, H) for _ in range(L)])
         self.upd = nn.ModuleList([mlp(3 * H, H, H) for _ in range(L)])
-        self.eupd = nn.ModuleList([mlp(3 * H, H, H) for _ in range(L)])      # обновление рёбер
+        self.eupd = nn.ModuleList([mlp(3 * H, H, H) for _ in range(L)])
         self.norm = nn.ModuleList([nn.LayerNorm(H) for _ in range(L)])
         self.enorm = nn.ModuleList([nn.LayerNorm(H) for _ in range(L)])
         self.head = mlp(3 * H, 1, H)
 
     def layer(self, k, h, ea, s, d, deg_in, deg_out):
-        m_in = self.msg_in[k](torch.cat([h[s], ea], 1))     # сообщение отправитель -> получатель
-        m_out = self.msg_out[k](torch.cat([h[d], ea], 1))   # обратное сообщение получатель -> отправитель
+        m_in = self.msg_in[k](torch.cat([h[s], ea], 1))
+        m_out = self.msg_out[k](torch.cat([h[d], ea], 1))
         a_in = torch.zeros_like(h).index_add_(0, d, m_in) / deg_in[:, None]
         a_out = torch.zeros_like(h).index_add_(0, s, m_out) / deg_out[:, None]
         h = self.norm[k](h + self.upd[k](torch.cat([h, a_in, a_out], 1)))
@@ -189,7 +162,7 @@ class MultiGNN(nn.Module):
         ea = F.relu(self.edge_in(torch.cat([g.num, self.e_cp(g.cp), self.e_cr(g.cr), self.e_fm(g.fm)], 1)))
         h = F.relu(self.node_in(g.node_x))
         for k in range(len(self.upd)):
-            if self.training:   # экономия памяти видеокарты: слой пересчитывается при обратном проходе
+            if self.training:
                 h, ea = checkpoint(self.layer, k, h, ea, g.s, g.d, g.deg_in, g.deg_out, use_reentrant=False)
             else:
                 h, ea = self.layer(k, h, ea, g.s, g.d, g.deg_in, g.deg_out)
@@ -263,7 +236,6 @@ y_te = y[te]
 np.save(HERE / f"test_scores_06_{args.loss}.npy", np.vstack([te, p_te]))
 
 
-# ------------------------------------------------------------------ метрики (как в шаге 4)
 def pr_curve(yt, sc):
     o = np.argsort(-sc, kind="stable")
     yy = yt[o]
