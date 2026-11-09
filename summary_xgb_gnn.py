@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-"""Шаг 8. Сводная таблица: XGBoost (шаг 4) и GNN с двумя функциями потерь (шаг 7), среднее ± std по сидам."""
 import json
 from pathlib import Path
 
@@ -17,7 +15,6 @@ lines = []
 
 
 def log(s=""):
-    print(s, flush=True)
     lines.append(s)
 
 
