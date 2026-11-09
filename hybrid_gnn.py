@@ -1,25 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Шаг 10. Гибрид: GNN, которой на вход рёбер даны графовые признаки XGBoost; плюс XGBoost и ансамбль на том же сиде для классификации транзакций (рёбер) — собственная реализация
-в духе Multi-GNN (Egressy et al., AAAI 2024) на чистом PyTorch, без torch_geometric.
-
-Что взято из Multi-GNN:
-  * обратная передача сообщений: входящие и исходящие соседи агрегируются РАЗНЫМИ сетями;
-  * номера портов: у каждого перевода есть номер получателя среди всех получателей отправителя
-    (по времени первого контакта) и номер отправителя у получателя;
-  * обновление рёбер (EU): признаки перевода обновляются на каждом слое по концам ребра.
-Не реализовано: Ego ID (нужна выборка подграфов; на AML-задаче в статье почти не помогает).
-
-Протокол как у Altman et al.: train-граф = train-рёбра, val-граф = train+val, test-граф = все рёбра.
-Обучение full-batch (весь граф за шаг) на CPU или GPU.
-
-Варианты функции потерь (аргумент --loss):
-  class  — взвешенная по классу кросс-энтропия (как в литературе);
-  amount — веса отмывочных переводов пропорциональны потерям L = min(сумма, CAP) (идея диплома).
-
-Запуск: python 10_hybrid.py --seed 0   (сиды 0, 1, 2; долгое обучение: --epochs 1500 --tag _long)
-Результаты: results_06_<loss>.txt, test_scores_06_<loss>.npy
-"""
 import argparse
 import os
 import time
@@ -49,8 +27,8 @@ args = ap.parse_args()
 
 HERE = Path(__file__).resolve().parent
 import os as _os
-DATA = _os.environ.get("AML_DATA", "HI-Small")          # HI-Small (по умолчанию) или LI-Small
-OUTD = HERE if DATA == "HI-Small" else HERE / DATA     # результаты второго набора — в отдельной папке
+DATA = _os.environ.get("AML_DATA", "HI-Small")
+OUTD = HERE if DATA == "HI-Small" else HERE / DATA
 OUTD.mkdir(exist_ok=True)
 
 DOWNLOADS = Path.home() / "Downloads"
@@ -66,7 +44,6 @@ lines = []
 
 def log(*a):
     s = " ".join(str(x) for x in a)
-    print(s, flush=True)
     lines.append(s)
     OUT.write_text("\n".join(lines), encoding="utf-8")
 
@@ -84,19 +61,16 @@ t0 = time.time()
 log(f"Устройство: {DEV}, потоков: {torch.get_num_threads()}, вариант потерь: {args.loss}, "
     f"hidden={args.hidden}, layers={args.layers}")
 
-# ------------------------------------------------------------------ данные
 COLS = ["Timestamp", "From_Bank", "From_Acc", "To_Bank", "To_Acc", "Amount_Received",
         "Receiving_Currency", "Amount_Paid", "Payment_Currency", "Payment_Format", "Is_Laundering"]
 df = pd.read_csv(find(f"{DATA}_Trans", [".csv", ".zip"]), header=0, names=COLS,
                  dtype={"From_Bank": str, "To_Bank": str, "From_Acc": str, "To_Acc": str})
 df["Timestamp"] = pd.to_datetime(df["Timestamp"], format="%Y/%m/%d %H:%M")
 n = len(df)
-# «хвост» генератора: первый день, после которого переводов в день < 1% медианы (на HI-Small — 11.09.2022)
 _days = df["Timestamp"].dt.floor("D").value_counts().sort_index()
 _small = _days < 0.01 * _days.median()
 _start = next((d for i, d in enumerate(_days.index) if _small.iloc[i:].all()), _days.index[-1] + pd.Timedelta(days=1))
 TAIL_START = np.datetime64(_start)
-print(f"Набор {DATA}; хвост генератора с {str(TAIL_START)[:10]}", flush=True)
 y = df["Is_Laundering"].values.astype(np.float32)
 
 rates = {"US Dollar": 1.0}
@@ -117,7 +91,6 @@ cur_r = pd.factorize(df["Receiving_Currency"])[0]
 fmt = pd.factorize(df["Payment_Format"])[0]
 tmin = df["Timestamp"].values.astype("datetime64[m]").astype(np.int64)
 
-# номера портов: порядок первого контакта с контрагентом
 e = pd.DataFrame({"s": S, "d": D, "t": tmin})
 first = e.groupby(["s", "d"], sort=False)["t"].min().reset_index()
 first["out_port"] = first.sort_values("t").groupby("s").cumcount()
@@ -143,7 +116,6 @@ Y = torch.tensor(y)
 order = np.argsort(df["Timestamp"].values, kind="stable")
 tr, va, te = order[:int(n * .6)], order[int(n * .6):int(n * .8)], order[int(n * .8):]
 
-# ---- графовые признаки XGBoost (как в шагах 4 и 9); считаются по рёбрам своего графа, метки не используются
 lusd = np.log1p(usd)
 IS_ACH = (df["Payment_Format"].values == "ACH").astype(float)
 PAIR = S * N + D
@@ -198,13 +170,12 @@ log(f"Загрузка и признаки: {time.time() - t0:.0f} с.  Счет
 
 
 class Graph:
-    """Набор рёбер (индексы транзакций) + степени узлов в этом графе. Хранится в ОЗУ, на GPU — по требованию."""
 
     def __init__(self, idx, gf):
         self.idx = torch.tensor(idx, dtype=torch.long)
         self.s, self.d = ST[self.idx], DT[self.idx]
         self.num, self.cp, self.cr, self.fm = (x[self.idx] for x in (NUM, CP, CR, FM))
-        self.num = torch.cat([self.num, gf], 1)          # + графовые признаки XGBoost
+        self.num = torch.cat([self.num, gf], 1)
         deg_in = torch.bincount(self.d, minlength=N).float()
         deg_out = torch.bincount(self.s, minlength=N).float()
         self.deg_in, self.deg_out = deg_in.clamp(min=1), deg_out.clamp(min=1)
@@ -220,8 +191,7 @@ class Graph:
 G_tr = Graph(tr, GF_T["tr"]).to(DEV)
 G_va = Graph(np.concatenate([tr, va]), GF_T["va"])
 G_te = Graph(order, GF_T["te"])
-pos_va = torch.arange(len(tr), len(tr) + len(va), device=DEV)    # позиции val-рёбер внутри G_va
-# позиции test-рёбер внутри G_te (order отсортирован по времени, test — последние 20%)
+pos_va = torch.arange(len(tr), len(tr) + len(va), device=DEV)
 pos_te = torch.arange(len(tr) + len(va), n, device=DEV)
 
 
@@ -235,17 +205,17 @@ class MultiGNN(nn.Module):
         self.e_cp, self.e_cr, self.e_fm = nn.Embedding(32, 4), nn.Embedding(32, 4), nn.Embedding(16, 4)
         self.edge_in = nn.Linear(NUM.shape[1] + NG + 12, H)
         self.node_in = nn.Linear(2, H)
-        self.msg_in = nn.ModuleList([mlp(2 * H, H, H) for _ in range(L)])    # от отправителей (входящие)
-        self.msg_out = nn.ModuleList([mlp(2 * H, H, H) for _ in range(L)])   # от получателей (обратная передача)
+        self.msg_in = nn.ModuleList([mlp(2 * H, H, H) for _ in range(L)])
+        self.msg_out = nn.ModuleList([mlp(2 * H, H, H) for _ in range(L)])
         self.upd = nn.ModuleList([mlp(3 * H, H, H) for _ in range(L)])
-        self.eupd = nn.ModuleList([mlp(3 * H, H, H) for _ in range(L)])      # обновление рёбер
+        self.eupd = nn.ModuleList([mlp(3 * H, H, H) for _ in range(L)])
         self.norm = nn.ModuleList([nn.LayerNorm(H) for _ in range(L)])
         self.enorm = nn.ModuleList([nn.LayerNorm(H) for _ in range(L)])
         self.head = mlp(3 * H, 1, H)
 
     def layer(self, k, h, ea, s, d, deg_in, deg_out):
-        m_in = self.msg_in[k](torch.cat([h[s], ea], 1))     # сообщение отправитель -> получатель
-        m_out = self.msg_out[k](torch.cat([h[d], ea], 1))   # обратное сообщение получатель -> отправитель
+        m_in = self.msg_in[k](torch.cat([h[s], ea], 1))
+        m_out = self.msg_out[k](torch.cat([h[d], ea], 1))
         a_in = torch.zeros_like(h).index_add_(0, d, m_in) / deg_in[:, None]
         a_out = torch.zeros_like(h).index_add_(0, s, m_out) / deg_out[:, None]
         h = self.norm[k](h + self.upd[k](torch.cat([h, a_in, a_out], 1)))
@@ -256,7 +226,7 @@ class MultiGNN(nn.Module):
         ea = F.relu(self.edge_in(torch.cat([g.num, self.e_cp(g.cp), self.e_cr(g.cr), self.e_fm(g.fm)], 1)))
         h = F.relu(self.node_in(g.node_x))
         for k in range(len(self.upd)):
-            if self.training:   # экономия памяти видеокарты: слой пересчитывается при обратном проходе
+            if self.training:
                 h, ea = checkpoint(self.layer, k, h, ea, g.s, g.d, g.deg_in, g.deg_out, use_reentrant=False)
             else:
                 h, ea = self.layer(k, h, ea, g.s, g.d, g.deg_in, g.deg_out)
@@ -274,7 +244,7 @@ if args.loss == "class":
     w[y_tr == 1] = pos_w ** 0.5
 else:
     Ltr = torch.tensor(np.minimum(usd[tr], args.cap), dtype=torch.float32, device=DEV)
-    lw = (Ltr[y_tr == 1] / Ltr[y_tr == 1].mean()).clamp(max=args.max_w)   # ограничение веса одного перевода
+    lw = (Ltr[y_tr == 1] / Ltr[y_tr == 1].mean()).clamp(max=args.max_w)
     lw = lw / lw.mean()
     w[y_tr == 1] = pos_w ** 0.5 * lw
 log(f"Веса: класс 1 = {pos_w ** 0.5:.1f} в среднем; вариант {args.loss}")
@@ -333,7 +303,6 @@ np.save(OUTD / f"test_scores_10_gnnhybrid_{TAG}.npy", np.vstack([te, p_te]))
 np.save(OUTD / f"val_scores_10_gnnhybrid_{TAG}.npy", np.vstack([va, p_va]))
 
 
-# ------------------------------------------------------------------ метрики (как в шаге 4)
 def pr_curve(yt, sc):
     o = np.argsort(-sc, kind="stable")
     yy = yt[o]
@@ -396,7 +365,6 @@ def evaluate(name, pva, pte):
     return pc
 
 
-# XGBoost на тех же признаках и том же сиде
 t2 = time.time()
 Xtr = np.hstack([TX_RAW[tr], GF["tr"]])
 Xva = np.hstack([TX_RAW[va], GF["va"][len(tr):]])
@@ -414,11 +382,9 @@ pc_g = evaluate("gnn_hybrid", p_va, p_te)
 pc_x = evaluate("xgb", x_va, x_te)
 np.save(OUTD / f"val_scores_10_xgb_{TAG}.npy", np.vstack([va, x_va]))
 np.save(OUTD / f"test_scores_10_xgb_{TAG}.npy", np.vstack([te, x_te]))
-# ансамбль: среднее рангов вероятностей (устойчиво к разной калибровке), затем своя калибровка
 e_va = (pd.Series(p_va).rank().values / len(p_va) + pd.Series(x_va).rank().values / len(x_va)) / 2
 e_te = (pd.Series(p_te).rank().values / len(p_te) + pd.Series(x_te).rank().values / len(x_te)) / 2
 evaluate("ensemble", np.clip(e_va, 1e-6, 1 - 1e-6), np.clip(e_te, 1e-6, 1 - 1e-6))
-# исправленный ансамбль: среднее ОТКАЛИБРОВАННЫХ вероятностей (Платт по валидации для каждой модели)
 def platt_both(pv, pt):
     a, b = fit_platt(lg(pv), y_va.astype(float))
     return 1 / (1 + np.exp(-(a * lg(pv) + b))), 1 / (1 + np.exp(-(a * lg(pt) + b)))
