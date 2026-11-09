@@ -1,0 +1,16 @@
+# данные (скачиваются с Kaggle)
+*.csv
+data/
+HI-Small/
+LI-Small/
+# результаты и прогнозы
+*.npy
+*.npz
+*.json
+results_*.txt
+*_log.txt
+*.pt
+# python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
