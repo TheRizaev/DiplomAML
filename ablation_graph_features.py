@@ -1,14 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Шаг 9. Абляция: нужен ли граф? XGBoost только на признаках самого перевода против XGBoost с графовыми признаками.
-
-Отличия от шага 3:
-  * графовые признаки для train считаются только по train-транзакциям,
-    для val — по train+val, для test — по всем (как три графа в статье);
-  * 5 запусков с разными сидами, среднее ± std;
-  * F1 и бюджетные метрики отдельно БЕЗ «хвоста» после 10.09 (где почти нет честных переводов).
-Запуск: python 09_ablation.py. Результаты: results_09_ablation.txt
-"""
 import time
 from pathlib import Path
 
@@ -28,7 +17,6 @@ lines = []
 
 def log(*a):
     s = " ".join(str(x) for x in a)
-    print(s, flush=True)
     lines.append(s)
 
 
@@ -80,7 +68,6 @@ def safe_div(a, b):
 
 
 def features(graph_idx, target_idx):
-    """Признаки для target_idx; все статистики счетов — только по рёбрам graph_idx (метки не используются)."""
     s, d = S[graph_idx], D[graph_idx]
     out_deg = np.bincount(s, minlength=A).astype(float)
     in_deg = np.bincount(d, minlength=A).astype(float)
