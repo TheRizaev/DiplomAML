@@ -1,15 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Шаг 13. Проверка гипотезы из п. 3.5.3: гибридная GNN лучше XGBoost ранжирует КРУПНЫЕ переводы.
-
-Используются уже сохранённые прогнозы на тесте (переобучение не нужно):
-  XGBoost     — scores_12_xgb.npz (шаг 12: сырые p и калиброванные Платтом pc, сиды 0–2);
-  GNN-гибрид  — test_scores_10_gnnhybrid_s*.npy, поправка pi = sigma(logit p − log v) (предложение 2.6).
-
-Для каждого диапазона сумм (в $): PR-AUC внутри диапазона, полнота отмывания в топ-K по pi·L,
-и доля переводов диапазона среди отобранных. Запускается для HI-Small и LI-Small (AML_DATA).
-Результат: results_13_large.txt (для LI-Small — в папке LI-Small).
-"""
 import os
 from pathlib import Path
 
@@ -28,7 +16,6 @@ lines = []
 
 def log(*a):
     s = " ".join(str(x) for x in a)
-    print(s, flush=True)
     lines.append(s)
     OUT.write_text("\n".join(lines), encoding="utf-8")
 
