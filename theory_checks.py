@@ -1,25 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Шаг 12. Проверка утверждений главы 2, которые ещё не проверены экспериментом.
-
-  Э1. Чувствительность к потолку C и форме функции потерь (п. 2.6.3, предложение 2.8):
-      C в {1e4, 1e5, 1e6, 1e7}, L = sqrt(A), L = log(1+A). Для каждой L — отбор по pi и по pi*L,
-      доля оракула, эффективное число n_eff.
-  Э2. Восстановление вероятностей без валидации (предложения 2.6, 2.7; схема В из п. 2.5):
-      GNN с весами по классу:  logit pi = logit p - log v;
-      GNN с весами по сумме:   logit pi = logit p - log v - log u(L).
-  Э3. Задача о рюкзаке (п. 2.3, теорема 2.2, следствие 2.5): стоимость проверки
-      c_i = 1 + kappa * log(1 + d_i), d_i — число переводов отправителя и получателя в графе.
-      Сравнение: отбор по pi, по pi*L, жадный по плотности pi*L/c; верхняя граница Данцига
-      и апостериорный сертификат (U - G)/G.
-
-Модели:
-  XGBoost (обучается здесь, 3 сида, калибровка Платта на валидации) — как в шаге 10;
-  GNN class / GNN amount (шаг 7), GNN-гибрид (шаг 10) — берутся сохранённые прогнозы на тесте
-  test_scores_07_*.npy и test_scores_10_gnnhybrid_*.npy; если файла нет, модель пропускается.
-
-Запуск: python 12_theory_checks.py.  Результат: results_12_theory.txt
-"""
 import time
 from pathlib import Path
 
@@ -28,16 +6,16 @@ import pandas as pd
 
 HERE = Path(__file__).resolve().parent
 import os as _os
-DATA = _os.environ.get("AML_DATA", "HI-Small")          # HI-Small (по умолчанию) или LI-Small
-OUTD = HERE if DATA == "HI-Small" else HERE / DATA     # результаты второго набора — в отдельной папке
+DATA = _os.environ.get("AML_DATA", "HI-Small")
+OUTD = HERE if DATA == "HI-Small" else HERE / DATA
 OUTD.mkdir(exist_ok=True)
 
 DOWNLOADS = Path.home() / "Downloads"
 OUT = OUTD / "results_12_theory.txt"
 SEEDS = [0, 1, 2]
 CAP = 1_000_000.0
-MAX_W = 10.0           # как в шагах 7 и 10
-U_MIN = 0.01           # нижний порог u(L) в схеме В
+MAX_W = 10.0
+U_MIN = 0.01
 KS = [100, 1000]
 lines = []
 t0 = time.time()
@@ -45,7 +23,6 @@ t0 = time.time()
 
 def log(*a):
     s = " ".join(str(x) for x in a)
-    print(s, flush=True)
     lines.append(s)
     OUT.write_text("\n".join(lines), encoding="utf-8")
 
@@ -59,7 +36,6 @@ def find(stem, exts):
     return None
 
 
-# ------------------------------------------------------------------ данные (как в шаге 10)
 COLS = ["Timestamp", "From_Bank", "From_Acc", "To_Bank", "To_Acc", "Amount_Received",
         "Receiving_Currency", "Amount_Paid", "Payment_Currency", "Payment_Format", "Is_Laundering"]
 df = pd.read_csv(find(f"{DATA}_Trans", [".csv", ".zip"]), header=0, names=COLS,
@@ -90,8 +66,6 @@ tr, va, te = order[:int(n * .6)], order[int(n * .6):int(n * .8)], order[int(n * 
 y_tr, y_va, y_te = y[tr], y[va], y[te]
 A_te = usd[te]
 log(f"Загрузка: {time.time() - t0:.0f} с. Тест: {len(te):,} переводов, отмывочных {int(y_te.sum())}")
-
-# ------------------------------------------------------------------ вспомогательные функции
 
 
 def lg(p):
@@ -138,9 +112,8 @@ def ms(a):
     return f"{a.mean():5.1f} ± {a.std():4.1f}" if len(a) > 1 else f"{a.mean():5.1f}       "
 
 
-# ------------------------------------------------------------------ веса обучения (для теоретической поправки)
 pos_w = float((y_tr == 0).sum() / y_tr.sum())
-V = pos_w ** 0.5                                   # вес класса 1 в шагах 7 и 10
+V = pos_w ** 0.5
 Ltr_pos = np.minimum(usd[tr][y_tr == 1], CAP)
 mean_L_pos = Ltr_pos.mean()
 lw_tr = np.minimum(Ltr_pos / mean_L_pos, MAX_W)
@@ -148,15 +121,12 @@ lw_mean = lw_tr.mean()
 
 
 def u_of_L(L):
-    """Множитель веса отмывочного перевода в варианте amount (шаг 7): u(L) = min(L/mean, MAX_W)/mean(...)."""
-    # при u -> 0 поправка неустойчива (у таких переводов вес в обучении почти нулевой): нижний порог U_MIN
     return np.maximum(np.minimum(L / mean_L_pos, MAX_W) / lw_mean, U_MIN)
 
 
 log(f"Вес класса v = {V:.1f}; средний L отмывочных в train = {mean_L_pos:,.0f} $; "
     f"u(L) от {u_of_L(np.array([0.0]))[0]:.3f} до {u_of_L(np.array([CAP]))[0]:.2f}")
 
-# ------------------------------------------------------------------ XGBoost (как в шаге 10)
 import xgboost as xgb
 
 lusd = np.log1p(usd)
@@ -200,11 +170,10 @@ Xtr = np.hstack([TX_RAW[tr], GF_tr])
 Xva = np.hstack([TX_RAW[va], GF_va[len(tr):]])
 Xte = np.hstack([TX_RAW[te], GF_te[len(tr) + len(va):]])
 del GF_tr, GF_va, GF_te
-# степень концов перевода в полном графе — для стоимости проверки в задаче о рюкзаке
 DEG_te = OD_all[S[te]] + ID_all[S[te]] + OD_all[D[te]] + ID_all[D[te]]
 
-models = {}       # имя -> список (по сидам) калиброванных/исправленных вероятностей на тесте
-raw = {}          # имя -> список сырых вероятностей на тесте
+models = {}
+raw = {}
 xgb_cache = OUTD / "scores_12_xgb.npz"
 if xgb_cache.exists():
     z = np.load(xgb_cache)
@@ -231,7 +200,6 @@ else:
     np.savez_compressed(xgb_cache, **store)
 del Xtr, Xva, Xte
 
-# ------------------------------------------------------------------ сохранённые прогнозы GNN
 L1 = np.minimum(A_te, CAP)
 
 
@@ -259,13 +227,12 @@ for name, pat, kind in gnn_specs:
         continue
     raw[name] = sc
     if kind == "class":
-        models[name] = [sig(lg(p) - np.log(V)) for p in sc]                       # предложение 2.6
+        models[name] = [sig(lg(p) - np.log(V)) for p in sc]
     else:
-        models[name] = [sig(lg(p) - np.log(V) - np.log(u_of_L(L1))) for p in sc]  # предложение 2.7, схема В
+        models[name] = [sig(lg(p) - np.log(V) - np.log(u_of_L(L1))) for p in sc]
     log(f"{name}: прогнозов {len(sc)} (сиды), поправка: "
         + ("logit p - log v" if kind == "class" else "logit p - log v - log u(L)"))
 
-# ================================================================== Э2. Схемы А / Б / В
 log("\n=== Э2. Восстановление вероятностей без валидации (предложения 2.6, 2.7), L = min(A, 1 млн) ===")
 log("Доля предотвращённого ущерба, %. Сырой p — выход модели; pi^ — после теоретической поправки.")
 log("  ожидаемое число отмывочных среди теста: сумма pi^ должна быть близка к фактическому числу")
@@ -283,7 +250,6 @@ for name in models:
     log(f"  {name:<12} сырой p: {np.mean([p.sum() for p in raw[name]]):10.0f}   "
         f"pi^: {np.mean([p.sum() for p in models[name]]):10.0f}")
 
-# ================================================================== Э1. Чувствительность к L
 log("\n=== Э1. Чувствительность к функции потерь (п. 2.6.3) ===")
 fns = [("min(A, " + f"{int(c):,}".replace(",", " ") + ")", (lambda a, c=c: np.minimum(a, c))) for c in (1e4, 1e5, 1e6, 1e7)]
 fns += [("sqrt(A)", np.sqrt), ("log(1+A)", np.log1p), ("A", lambda a: a.astype(float))]
@@ -306,7 +272,6 @@ for K in KS:
         log(row + f"{oracle(Lt, y_te, K) * 100:>8.1f}")
 log("Вывод устойчив, если правая цифра в каждой паре не меньше левой при всех L.")
 
-# ================================================================== Э3. Рюкзак
 log("\n=== Э3. Разная стоимость проверок: задача о рюкзаке (п. 2.3) ===")
 log("c_i = 1 + kappa·log(1 + d_i), d_i — число переводов отправителя и получателя в полном графе.")
 log("Бюджет B = K · (средняя стоимость). G — жадный по плотности (префикс до первого не влезшего),")
@@ -330,7 +295,7 @@ def greedy_fill(key, c, B, limit=400_000):
 def dantzig(w, c, B):
     o = np.argsort(-(w / c), kind="stable")
     cc, ww = np.cumsum(c[o]), np.cumsum(w[o])
-    k = int(np.searchsorted(cc, B, side="right"))          # первый не влезший в порядке плотности
+    k = int(np.searchsorted(cc, B, side="right"))
     G = ww[k - 1] if k > 0 else 0.0
     used = cc[k - 1] if k > 0 else 0.0
     U = G + (B - used) * w[o[k]] / c[o[k]] if k < len(o) else G
