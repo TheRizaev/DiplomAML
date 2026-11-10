@@ -23,6 +23,10 @@ ap.add_argument("--max_w", type=float, default=10.0)
 ap.add_argument("--seed", type=int, default=0)
 ap.add_argument("--cap", type=float, default=1_000_000)
 ap.add_argument("--tag", default="", help="суффикс имён файлов, например _long")
+ap.add_argument("--cur_flag", default="codes", choices=["codes", "exact"],
+                help="признак «разные валюты»: сравнение кодов валют (как в основной серии) или названий валют")
+ap.add_argument("--norm", default="all", choices=["all", "train"],
+                help="статистики стандартизации признаков перевода: по всем переводам или только по обучающим")
 args = ap.parse_args()
 
 HERE = Path(__file__).resolve().parent
@@ -89,6 +93,10 @@ banks, _ = pd.factorize(pd.concat([df["From_Bank"], df["To_Bank"]]))
 cur_p = pd.factorize(df["Payment_Currency"])[0]
 cur_r = pd.factorize(df["Receiving_Currency"])[0]
 fmt = pd.factorize(df["Payment_Format"])[0]
+if args.cur_flag == "exact":
+    DIFF_CUR = df["Payment_Currency"].values != df["Receiving_Currency"].values
+else:
+    DIFF_CUR = cur_p != cur_r
 tmin = df["Timestamp"].values.astype("datetime64[m]").astype(np.int64)
 
 e = pd.DataFrame({"s": S, "d": D, "t": tmin})
@@ -101,12 +109,16 @@ del e, first
 
 num = np.stack([
     np.log1p(usd), np.log1p(usd_r),
-    (cur_p != cur_r).astype(np.float32), (S == D).astype(np.float32),
+    DIFF_CUR.astype(np.float32), (S == D).astype(np.float32),
     (banks[:n] == banks[n:]).astype(np.float32),
     df["Timestamp"].dt.hour.values / 23.0,
     np.log1p(out_port), np.log1p(in_port),
 ], axis=1).astype(np.float32)
-mu, sd = num.mean(0), num.std(0) + 1e-6
+if args.norm == "train":
+    _tr = np.argsort(df["Timestamp"].values, kind="stable")[:int(n * .6)]
+    mu, sd = num[_tr].mean(0), num[_tr].std(0) + 1e-6
+else:
+    mu, sd = num.mean(0), num.std(0) + 1e-6
 num = (num - mu) / sd
 NUM = torch.tensor(num)
 CP, CR, FM = (torch.tensor(a, dtype=torch.long) for a in (cur_p, cur_r, fmt))
@@ -152,7 +164,7 @@ def graph_feats(gidx):
     return F_.astype(np.float32)
 
 
-TX_RAW = np.stack([lusd, np.log1p(usd_r), cur_p, cur_r, fmt, (cur_p != cur_r), (S == D), (SB == DB),
+TX_RAW = np.stack([lusd, np.log1p(usd_r), cur_p, cur_r, fmt, DIFF_CUR, (S == D), (SB == DB),
                    df["Timestamp"].dt.hour.values, df["Timestamp"].dt.hour.values * 60 + df["Timestamp"].dt.minute.values],
                   1).astype(np.float32)
 GF = {}
